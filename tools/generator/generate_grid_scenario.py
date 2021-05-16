@@ -3,6 +3,8 @@ import json
 import os
 from generate_json_from_grid import gridToRoadnet
 
+from get_turn_route import get_turn_route
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("rowNum", type=int)
@@ -31,11 +33,11 @@ def parse_args():
     parser.add_argument("--flowFile", type=str)
     return parser.parse_args()
 
-def generate_route(rowNum, colNum, turn=False):
+def get_straight_routes(rowNum, colNum):
     routes = []
     move = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 
-    def get_straight_route(start, direction, step):
+    def generate_straight_route(start, direction, step):
         x, y = start
         route = []
         for _ in range(step):
@@ -45,37 +47,29 @@ def generate_route(rowNum, colNum, turn=False):
         return route
 
     for i in range(1, rowNum+1):
-        routes.append(get_straight_route((0, i), 0, colNum+1))
-        routes.append(get_straight_route((colNum+1, i), 2, colNum+1))
+        routes.append(generate_straight_route((0, i), 0, colNum+1))
+        routes.append(generate_straight_route((colNum+1, i), 2, colNum+1))
     for i in range(1, colNum+1):
-        routes.append(get_straight_route((i, 0), 1, rowNum+1))
-        routes.append(get_straight_route((i, rowNum+1), 3, rowNum+1))
-    
-    if turn:
-        def get_turn_route(start, direction):
-            if direction[0] % 2 == 0:
-                step = min(rowNum*2, colNum*2+1)
-            else:
-                step = min(colNum*2, rowNum*2+1)
-            x, y = start
-            route = []
-            cur = 0
-            for _ in range(step):
-                route.append("road_%d_%d_%d" % (x, y, direction[cur]))
-                x += move[direction[cur]][0]
-                y += move[direction[cur]][1]
-                cur = 1 - cur
-            return route
+        routes.append(generate_straight_route((i, 0), 1, rowNum+1))
+        routes.append(generate_straight_route((i, rowNum+1), 3, rowNum+1))
 
-        routes.append(get_turn_route((1, 0), (1, 0)))
-        routes.append(get_turn_route((0, 1), (0, 1)))
-        routes.append(get_turn_route((colNum+1, rowNum), (2, 3)))
-        routes.append(get_turn_route((colNum, rowNum+1), (3, 2)))
-        routes.append(get_turn_route((0, rowNum), (0, 3)))
-        routes.append(get_turn_route((1, rowNum+1), (3, 0)))
-        routes.append(get_turn_route((colNum+1, 1), (2, 1)))
-        routes.append(get_turn_route((colNum, 0), (1, 2)))
-    
+    return routes
+
+def get_turn_routes(rowNum, colNum):
+    routes = []
+
+    dims = (rowNum, colNum)
+
+    # bottom & top
+    for i in range(0, rowNum):
+        routes.append(get_turn_route((i + 1, 0), (0, 1), dims))
+        routes.append(get_turn_route((i + 1, colNum + 1), (0, -1), dims))
+
+    # left & right
+    for i in range(0, colNum):
+        routes.append(get_turn_route((0, i + 1), (1, 0), dims))
+        routes.append(get_turn_route((rowNum + 1, i + 1), (-1, 0), dims))
+
     return routes
 
 if __name__ == '__main__':
@@ -113,15 +107,28 @@ if __name__ == '__main__':
         "maxSpeed": args.vehMaxSpeed,
         "headwayTime": args.vehHeadwayTime
     }
-    routes = generate_route(args.rowNum, args.colNum, args.turn)
+    routes = get_turn_routes(args.rowNum, args.colNum) if args.turn else get_straight_routes(args.rowNum, args.colNum)
+
     flow = []
-    for route in routes:
-        flow.append({
-            "vehicle": vehicle_template,
-            "route": route,
-            "interval": args.interval,
-            "startTime": 0,
-            "endTime": -1
-        })
+    if args.turn:
+        for route in routes:
+            for index, r in enumerate(route):
+                flow.append({
+                    "vehicle": vehicle_template,
+                    "route": r,
+                    "interval": len(route),
+                    "startTime": index,
+                    "endTime": -1
+                })
+    else:
+        for route in routes:
+            flow.append({
+                "vehicle": vehicle_template,
+                "route": route,
+                "interval": args.interval,
+                "startTime": 0,
+                "endTime": -1
+            })
+
     json.dump(flow, open(os.path.join(args.dir, args.flowFile), "w"), indent=2)
 
